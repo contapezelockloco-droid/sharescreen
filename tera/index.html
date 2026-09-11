@@ -347,6 +347,53 @@
             overflow: hidden;
             border-radius: 11px;
             background: #090a0d;
+            min-height: 280px;
+            padding: 8px;
+        }
+
+        .video-stage > #screenVideo {
+            display: block;
+            min-height: 260px;
+            object-fit: contain;
+        }
+
+        .video-stage.viewer-mode > #screenVideo {
+            display: none;
+        }
+
+        .remote-videos {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 8px;
+        }
+
+        .remote-video-card {
+            position: relative;
+            min-width: 0;
+            overflow: hidden;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: #050608;
+        }
+
+        .remote-video-card video {
+            display: block;
+            width: 100%;
+            height: 100%;
+            min-height: 180px;
+            max-width: none;
+            object-fit: contain;
+        }
+
+        .remote-video-card span {
+            position: absolute;
+            left: 10px;
+            bottom: 10px;
+            padding: 5px 8px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.7);
+            color: var(--ink);
+            font-size: 0.72rem;
         }
 
         .video-stage:fullscreen {
@@ -688,6 +735,15 @@
                 padding-top: 28px;
             }
 
+            body {
+                display: block;
+                min-height: 100svh;
+            }
+
+            .room-screen {
+                width: 100%;
+            }
+
             .topbar {
                 margin-bottom: 62px;
             }
@@ -719,6 +775,53 @@
 
             .room-info {
                 display: block;
+            }
+
+            .room-info .copy-room {
+                margin-top: 16px;
+            }
+
+            .room-actions {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .room-actions button:first-child,
+            .room-actions button:last-child {
+                grid-column: 1 / -1;
+            }
+
+            .video-container {
+                padding: 7px;
+                margin-top: 16px;
+            }
+
+            .video-stage {
+                min-height: 190px;
+            }
+
+            .video-stage > #screenVideo {
+                min-height: 190px;
+            }
+
+            .remote-videos {
+                grid-template-columns: 1fr;
+            }
+
+            .remote-video-card video {
+                min-height: 190px;
+            }
+
+            .video-toolbar {
+                gap: 5px;
+                overflow-x: auto;
+                justify-content: flex-start;
+                padding-bottom: 4px;
+            }
+
+            .video-tool,
+            .video-select {
+                flex: 0 0 auto;
             }
 
             .room-sidebar {
@@ -802,6 +905,7 @@
                     <div class="video-container">
                         <div class="video-stage" id="videoStage">
                             <video id="screenVideo" autoplay playsinline></video>
+                            <div class="remote-videos" id="remoteVideos"></div>
                         </div>
                         <div class="video-toolbar" aria-label="Controles da transmissão">
                             <button class="video-tool" id="zoomOutBtn" onclick="changeZoom(-0.1)" title="Diminuir visualização">−</button>
@@ -864,6 +968,7 @@
         let modalMode = 'name';
         let modalCallback = null;
         const peers = new Map();
+        const participantNames = new Map();
 
         function generateRoomId() {
             return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -962,6 +1067,7 @@
 
         function addParticipant(participant) {
             if (document.getElementById('member-' + participant.id)) return;
+            participantNames.set(participant.id, participant.name);
             const member = document.createElement('div');
             member.className = 'member';
             member.id = 'member-' + participant.id;
@@ -974,6 +1080,7 @@
 
         function removeParticipant(id) {
             document.getElementById('member-' + id)?.remove();
+            closePeer(id);
             updateParticipantCounts();
         }
 
@@ -1014,12 +1121,32 @@
             peers.set(peerId, peer);
             if (mediaStream) mediaStream.getTracks().forEach((track) => peer.addTrack(track, mediaStream));
             peer.ontrack = (event) => {
-                const video = document.getElementById('screenVideo');
-                if (!mediaStream) {
-                    const stream = event.streams[0] || new MediaStream([event.track]);
-                    video.srcObject = stream;
+                const stream = event.streams[0] || new MediaStream([event.track]);
+                const container = document.getElementById('remoteVideos');
+                document.getElementById('videoStage').classList.add('viewer-mode');
+                let card = document.getElementById('remote-video-' + peerId);
+                let video = card?.querySelector('video');
+                if (!card) {
+                    card = document.createElement('div');
+                    card.className = 'remote-video-card';
+                    card.id = 'remote-video-' + peerId;
+                    video = document.createElement('video');
+                    video.autoplay = true;
+                    video.playsInline = true;
+                    const label = document.createElement('span');
+                    label.textContent = participantNames.get(peerId) || 'Participante';
+                    card.append(video, label);
+                    container.appendChild(card);
+                }
+                video.srcObject = stream;
+                video.muted = true;
+                video.addEventListener('click', () => {
                     video.muted = false;
-                    video.play().catch(() => updateStatus('Toque no vídeo para iniciar a transmissão.'));
+                    video.play().catch(() => {});
+                }, { once: true });
+                video.play().catch(() => updateStatus('Toque em uma tela para iniciar a transmissão.'));
+                if (event.track.kind === 'video') {
+                    event.track.addEventListener('ended', () => card.remove(), { once: true });
                 }
             };
             peer.onconnectionstatechange = () => {
@@ -1075,6 +1202,8 @@
             const peer = peers.get(id);
             if (peer) peer.close();
             peers.delete(id);
+            document.getElementById('remote-video-' + id)?.remove();
+            participantNames.delete(id);
         }
 
         function copyRoomCode() {
@@ -1141,6 +1270,7 @@
                 const videoElement = document.getElementById('screenVideo');
                 videoElement.srcObject = mediaStream;
                 videoElement.muted = true;
+                document.getElementById('videoStage').classList.remove('viewer-mode');
                 
                 document.getElementById('status').textContent = '🟢 Compartilhando sua tela...';
                 document.getElementById('shareBtn').disabled = true;
@@ -1219,9 +1349,15 @@
 
         function stopSharing() {
             if (mediaStream) {
+                const tracks = new Set(mediaStream.getTracks());
+                peers.forEach((peer) => {
+                    peer.getSenders().forEach((sender) => {
+                        if (sender.track && tracks.has(sender.track)) peer.removeTrack(sender);
+                    });
+                });
                 mediaStream.getTracks().forEach(track => track.stop());
                 document.getElementById('screenVideo').srcObject = null;
-                document.getElementById('screenVideo').muted = false;
+                document.getElementById('videoStage').classList.remove('viewer-mode');
                 document.getElementById('status').textContent = 'Compartilhamento encerrado';
                 document.getElementById('shareBtn').disabled = false;
                 audioMuted = false;
