@@ -4,19 +4,26 @@ const path = require('path');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 
-const root = __dirname;
+const roots = [__dirname, process.cwd(), path.join(process.cwd(), 'tera')];
 const rooms = new Map();
 
 const server = http.createServer((request, response) => {
-    const requestedPath = request.url === '/' ? '/index.html' : request.url;
-    const filePath = path.join(root, requestedPath.split('?')[0]);
-    if (!filePath.startsWith(root) || !fs.existsSync(filePath)) {
+    const requestedPath = request.url === '/' ? 'index.html' : request.url.split('?')[0].replace(/^[/\\]+/, '');
+    const filePath = roots
+        .map((root) => ({ root: path.resolve(root), candidate: path.resolve(root, requestedPath) }))
+        .find(({ root, candidate }) => candidate.startsWith(root + path.sep) && fs.existsSync(candidate))
+        ?.candidate;
+    if (!filePath) {
         response.writeHead(404);
         response.end('Not found');
         return;
     }
 
-    const contentType = filePath.endsWith('.html') ? 'text/html; charset=utf-8' : 'text/plain';
+    const contentType = filePath.endsWith('.html')
+        ? 'text/html; charset=utf-8'
+        : filePath.endsWith('.js')
+            ? 'text/javascript; charset=utf-8'
+            : 'text/plain';
     response.writeHead(200, { 'Content-Type': contentType });
     fs.createReadStream(filePath).pipe(response);
 });
