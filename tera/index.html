@@ -994,7 +994,10 @@
             if (mediaStream) mediaStream.getTracks().forEach((track) => peer.addTrack(track, mediaStream));
             peer.ontrack = (event) => {
                 const video = document.getElementById('screenVideo');
-                if (!mediaStream) video.srcObject = event.streams[0];
+                if (!mediaStream) {
+                    video.srcObject = event.streams[0];
+                    video.muted = false;
+                }
             };
             peer.onicecandidate = (event) => {
                 if (event.candidate) sendSignal(peerId, { candidate: event.candidate });
@@ -1097,6 +1100,7 @@
 
                 const videoElement = document.getElementById('screenVideo');
                 videoElement.srcObject = mediaStream;
+                videoElement.muted = true;
                 
                 document.getElementById('status').textContent = '🟢 Compartilhando sua tela...';
                 document.getElementById('shareBtn').disabled = true;
@@ -1174,6 +1178,7 @@
             if (mediaStream) {
                 mediaStream.getTracks().forEach(track => track.stop());
                 document.getElementById('screenVideo').srcObject = null;
+                document.getElementById('screenVideo').muted = false;
                 document.getElementById('status').textContent = 'Compartilhamento encerrado';
                 document.getElementById('shareBtn').disabled = false;
                 audioMuted = false;
