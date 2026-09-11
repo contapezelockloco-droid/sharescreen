@@ -987,14 +987,30 @@
             document.getElementById('status').textContent = message;
         }
 
+        function appendMessage(author, text) {
+            const message = document.createElement('div');
+            message.className = 'message';
+            message.innerHTML = '<strong>' + escapeHtml(author || 'Participante') +
+                '</strong><time>agora</time><br>' + escapeHtml(text || '');
+            const messages = document.getElementById('chatMessages');
+            messages.appendChild(message);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
         function createPeer(peerId, initiator) {
-            if (peers.has(peerId)) return peers.get(peerId);
+            if (peers.has(peerId)) {
+                const existingPeer = peers.get(peerId);
+                existingPeer.isBroadcaster = existingPeer.isBroadcaster || initiator;
+                return existingPeer;
+            }
             const peer = new RTCPeerConnection({
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun.cloudflare.com:3478' }
                 ]
             });
+            peer.isBroadcaster = initiator;
+            peer.pendingCandidates = [];
             peers.set(peerId, peer);
             if (mediaStream) mediaStream.getTracks().forEach((track) => peer.addTrack(track, mediaStream));
             peer.ontrack = (event) => {
@@ -1003,7 +1019,7 @@
                     const stream = event.streams[0] || new MediaStream([event.track]);
                     video.srcObject = stream;
                     video.muted = false;
-                    video.play().catch(() => updateStatus('Clique na tela para iniciar o vídeo compartilhado.'));
+                    video.play().catch(() => updateStatus('Toque no vídeo para iniciar a transmissão.'));
                 }
             };
             peer.onconnectionstatechange = () => {
@@ -1015,10 +1031,14 @@
                 if (event.candidate) sendSignal(peerId, { candidate: event.candidate });
             };
             peer.onnegotiationneeded = async () => {
-                if (!initiator) return;
-                const offer = await peer.createOffer();
-                await peer.setLocalDescription(offer);
-                sendSignal(peerId, { description: peer.localDescription });
+                if (!peer.isBroadcaster || peer.signalingState !== 'stable') return;
+                try {
+                    const offer = await peer.createOffer();
+                    await peer.setLocalDescription(offer);
+                    sendSignal(peerId, { description: peer.localDescription });
+                } catch (error) {
+                    console.warn('Não foi possível negociar a transmissão:', error);
+                }
             };
             return peer;
         }
@@ -1033,13 +1053,21 @@
             const peer = createPeer(message.from, false);
             if (message.description) {
                 await peer.setRemoteDescription(message.description);
+                for (const candidate of peer.pendingCandidates) {
+                    await peer.addIceCandidate(candidate);
+                }
+                peer.pendingCandidates = [];
                 if (message.description.type === 'offer') {
                     const answer = await peer.createAnswer();
                     await peer.setLocalDescription(answer);
                     sendSignal(message.from, { description: peer.localDescription });
                 }
             } else if (message.candidate) {
-                await peer.addIceCandidate(message.candidate);
+                if (peer.remoteDescription) {
+                    await peer.addIceCandidate(message.candidate);
+                } else {
+                    peer.pendingCandidates.push(message.candidate);
+                }
             }
         }
 
@@ -1118,8 +1146,11 @@
                 document.getElementById('shareBtn').disabled = true;
                 updateVideoSettings();
                 peers.forEach((peer, peerId) => {
-                    mediaStream.getTracks().forEach((track) => peer.addTrack(track, mediaStream));
-                    createPeer(peerId, true);
+                    const broadcasterPeer = createPeer(peerId, true);
+                    const existingSenders = broadcasterPeer.getSenders().map((sender) => sender.track);
+                    mediaStream.getTracks().forEach((track) => {
+                        if (!existingSenders.includes(track)) broadcasterPeer.addTrack(track, mediaStream);
+                    });
                 });
 
                 // Detectar quando o usuário parar de compartilhar
@@ -1227,6 +1258,11 @@
                 navigator.clipboard.writeText(currentRoom);
                 alert('Código da sala copiado: ' + currentRoom);
             }
+        });
+
+        document.getElementById('screenVideo').addEventListener('click', () => {
+            const video = document.getElementById('screenVideo');
+            if (video.srcObject) video.play().catch(() => updateStatus('Não foi possível iniciar o vídeo.'));
         });
     </script>
 </body>
